@@ -8,6 +8,7 @@
 import argparse
 import benchexec.util as util
 import benchexec.tools.template
+import benchexec.tooladapter as tooladapter
 import contextlib
 import os
 import re
@@ -48,19 +49,15 @@ class Tool(benchexec.tools.template.BaseTool):
     def name(self):
         return "metaval"
 
-    @contextlib.contextmanager
-    def _in_tool_directory(self, verifierName):
-        """
-        Context manager that sets the current working directory to the tool's directory
-        and resets its afterward. The returned value is the previous working directory.
-        """
-        with self.lock:
-            try:
-                oldcwd = os.getcwd()
-                os.chdir(os.path.join(oldcwd, self.TOOL_TO_PATH_MAP[verifierName]))
-                yield oldcwd
-            finally:
-                os.chdir(oldcwd)
+    def _get_ToolAdapter(self, verifierName):
+        return tooladapter.Tool1To2(self.wrappedTools[verifierName])
+
+    def _get_ToolLocator(self, verifierName):
+        from types import SimpleNamespace as SN
+
+        config = SN()
+        config.tool_directory = os.path.join(os.getcwd(), self.TOOL_TO_PATH_MAP[verifierName])
+        return tooladapter.create_tool_locator(config)
 
     def determine_result(self, returncode, returnsignal, output, isTimeout):
         verifierDir = None
@@ -108,14 +105,16 @@ class Tool(benchexec.tools.template.BaseTool):
                 ).Tool()
 
         if verifierName in self.wrappedTools:
-            with self._in_tool_directory(verifierName) as oldcwd:
-                wrappedOptions = self.wrappedTools[verifierName].cmdline(
-                    self.wrappedTools[verifierName].executable(),
-                    options,
-                    [os.path.relpath(os.path.join(oldcwd, "output/ARG.c"))],
-                    os.path.relpath(os.path.join(oldcwd, propertyfile)),
-                    rlimits,
-                )
+            cwd = os.getcwd()
+            wrappedOptions = self.wrappedTools[verifierName].cmdline(
+                self._getToolAdapter(verifierName).executable(
+                    _self.getToolLocator(verifierName)
+                ),
+                options,
+                [os.path.relpath(os.path.join(cwd, "output/ARG.c"))],
+                os.path.relpath(os.path.join(cwd, propertyfile)),
+                rlimits,
+            )
             return (
                 [
                     executable,
